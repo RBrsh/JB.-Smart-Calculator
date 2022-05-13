@@ -1,214 +1,187 @@
-import string
 import re
+import operator
 
 
 class SmartCalculator:
-    operation_types = {'command': r'^/\w+',
-                       'declaration': '.*=.*',
-                       'retrievement': '^[A-z]+$',
-                       'calculation': r'^ *[-]*[A-z\d]+[ +-]*',
-                       }
-    valid_declaration = ('^ *([A-z]+) *=',
-                         r'^[^=]+= *((-?\d+)|([A-z]+)) *$',
-                         )
-    declaration_errors = ('Invalid identifier', 'Invalid assignment')
-    variable_errors = ('Unknown variable',)
-    help_message = 'The program calculates the sum and difference of numbers.'
-    bye_message = 'Bye'
-
     def __init__(self):
-        self.handlers = {'command': self.__execute_command,
-                         'declaration': self.__process_declaration,
-                         'retrievement': self.__retrieve_variable,
-                         'calculation': self.__calculate,
-                         }
-        self.variables = {}
+        self.__operations = {'command':
+                                 [r'^/\w+', self.__execute_command],
+                             'declaration':
+                                 ['.*=.*', self.__process_declaration],
+                             'retrievement':
+                                 ['^[A-z]+$', self.__retrieve_variable],
+                             'calculation':
+                                 [r'^ *[-]*[A-Za-z()\d]+[ +-]*',
+                                  self.__calculate],
+                             }
+        self.__valid_declare_patters = ('^ *([A-z]+) *=',
+                                        r'^[^=]+= *((-?\d+)|([A-Za-z]+)) *$',)
+        self.__declaration_errors = ('Invalid identifier',
+                                     'Invalid assignment',)
+        self.__variable_errors = ('Unknown variable',)
+        self.__help_message = '''The program calculates simple arithmetic 
+        expressions, understands several commands and can use variables in
+        calculations.'''
+        self.__bye_message = 'Bye'
+        self.__expression_messages = ('Invalid expression',)
+        self.__command_messages = ('Unknown command',)
+        self.__operators = {'-': [1, operator.sub],
+                            '+': [1, operator.add],
+                            '*': [2, operator.mul],
+                            '/': [2, operator.truediv],
+                            '^': [3, operator.pow],
+                            }
+        self.__okfr = ''.join(self.__operators.keys())  # Operators keys for RE
+        self.user_variables = {}
 
-    def process_input(self, user_input):
-        for operation, pattern in self.operation_types.items():
-            #print(f'{operation}: {pattern}, {user_input}')
-            if re.match(pattern, user_input):
-                #print('ddd')
-                res = self.handlers[operation](user_input)
+    def process_input(self, user_input: str) -> None:
+        """
+        Processes user input and takes action depending on the input: executes
+        commands, stores variable, calculates expressions. Results are printed
+        to stdout.
+        :param user_input:
+        :return: None
+        """
+        for operation, pattern in self.__operations.items():
+            if re.match(pattern[0], user_input):
+                self.__operations[operation][1](user_input)
                 return
 
     def __execute_command(self, command):
         command = command[1:]  # Get rid of / at the beginning
 
         if command == 'exit':
-            print(self.bye_message)
+            print(self.__bye_message)
             exit()
         elif command == 'help':
-            print(self.help_message)
+            print(self.__help_message)
         else:
-            print('Unknown command')
+            print(self.__command_messages[0])
 
-    def __process_declaration(self, declaration):
+    def __process_declaration(self, declaration: str) -> None:
         res = []
-        for i, pattern in enumerate(self.valid_declaration):
-           # print(i, pattern, declaration)
+        for i, pattern in enumerate(self.__valid_declare_patters):
             m = re.search(pattern, declaration)
             if not m:
-                print(self.declaration_errors[i])
+                print(self.__declaration_errors[i])
                 return
-            #print(m.groups())
 
             if i > 0:
-                if m.group(1) in self.variables.keys():
-                    res.append(self.variables[m.group(1)])
+                if m.group(1) in self.user_variables.keys():
+                    res.append(self.user_variables[m.group(1)])
                 elif re.match(r'\d+', m.group(1)):
                     res.append(m.group(1))
                 else:
-                    print(self.declaration_errors[i])
+                    print(self.__declaration_errors[i])
                     return
-                   #print(f'Here: {self.variables[m.group(1)]}. {m.group(1)}')
             else:
                 res.append(m.group(1))
 
         if res and len(res) == 2:
-            self.variables.update({res[0]: res[1]})
+            self.user_variables.update({res[0]: res[1]})
 
-    def __retrieve_variable(self, name):
-        variable_value = self.variables.setdefault(name.strip())
+    def __retrieve_variable(self, name: str) -> None:
+        variable_value = self.user_variables.setdefault(name.strip())
         if variable_value is not None:
             print(variable_value)
         else:
-            print(self.variable_errors[0])
+            print(self.__variable_errors[0])
 
-    def __calculate(self, expression):
-        el = expression.split()
-        calc_stack = []
-        negative = False
+    def __calculate(self, expression: str) -> None:
+        if self.__is_valid_expression(expression):
+            result = self.__calculate_postfix(
+                self.__convert_to_postfix(expression)
+            )
+            if result is not None:
+                print(result)
+        else:
+            print(self.__expression_messages[0])
+        return
 
-        for i in el:
-           # if not is_valid_expression(i):
-            #    print('Invalid expression')
-             #   break
+    def __calculate_postfix(self, postfix: list):
+        result = []
 
-            if i == '+':
-                continue
-            if i == '-':
-                negative = True
-                continue
+        for i in postfix:
+            if re.match(r'\d+$', i):
+                result.append(int(i))
+            elif re.match('[A-Za-z]+$', i):
+                try:
+                    result.append(int(self.user_variables[i]))
+                except KeyError:
+                    print(self.__variable_errors[0])
+                    return
+            elif i in self.__operators:
+                b, a = result.pop(), result.pop()
+                result.append(self.__operators[i][1](a, b))
 
-            if i[0] == '+':
-                i = i[1:]
+        if len(result) == 1:
+            # Convert to int to get rif of decimal part if it's zero.
+            int_result = int(result[0])
+            return int_result if result[0] == int_result else result[0]
 
-            if i[0] == '-' and len(i) >= 2 and i[1] in string.digits:
-                negative = True
-                i = i[1:]
+    def __convert_to_postfix(self, infix: str) -> list:
+        stack = []
+        postfix = []
 
-            var_value = self.variables.setdefault(i)
-            if var_value:
-                i = var_value
+        infix = infix.replace(' ', '')
+        infix = re.sub(r'(\+)\+*', r'\1', infix)
 
-            if len([_ for _ in i if _ in string.digits]) == len(i):
-                i = int(i)
-                if negative:
-                    #  print('Nega')
-                    i = -i
-                    negative = False
-                # print(i)
-                calc_stack.append(i)
+        for i in re.finditer('-{2,}', infix):
+            if (i.end() - i.start()) % 2 == 0:
+                infix = infix[:i.start()] + '+' + infix[i.end():]
             else:
-                if determine_sign(i) == '-':
-                    negative = True
-        # print(calc_stack)
-        if calc_stack:
-            print(sum(calc_stack))
+                infix = infix[:i.start()] + infix[i.end() - 1:]
 
-def determine_sign(sign_string: str) -> str:
-    sign = ''
-
-    for s in sign_string:
-        if not sign:
-            sign = s
-            continue
-
-        if s == sign and s == '-':
-            sign = '+'
-            continue
-
-        if s != sign and s == '-':
-            sign = '-'
-            continue
-
-    #print(f'{sign_string}: {sign}')
-    return sign
-
-
-def is_valid_expression(string_to_check):
-    if re.match('(^[+-]*\d+$)|([+-]+)', string_to_check):
-        return True
-    return False
-
-
-def is_valid_command(string_to_check):
-    if string_to_check in valid_commands:
-        return True
-    return False
-
-
-# valid_commands = ['/exit', '/help']
-
-calc = SmartCalculator()
-
-while True:
-    ui = input()
-
-    if ui == '':
-        continue
-
-    calc.process_input(ui)
-
-    '''
-    if ui[0] == '/' and not is_valid_command(ui):
-        print('Unknown command')
-        continue
-
-    if ui == '/exit':
-        print('Bye!')
-        break
-    elif ui == '':
-        continue
-    elif ui == '/help':
-        print('The program calculates the sum and difference of numbers')
-    else:
-        ui = ui.split()
-        calc_stack = []
-        negative = False
-
-        for i in ui:
-            if not is_valid_expression(i):
-                print('Invalid expression')
-                break
-
-            if i == '+':
+        for i in re.findall(rf'[{self.__okfr}()]|\d+|[A-z]+', infix):
+            if re.match(r'\d+|[A-Za-z]+', i):
+                postfix.append(i)
                 continue
-            if i == '-':
-                negative = True
-                continue
+            elif i in self.__operators:
+                if not stack or stack[-1] == '(':
+                    stack.append(i)
+                    continue
 
-            if i[0] == '+':
-                i = i[1:]
+                if self.__operators[i][0] > self.__operators[stack[-1]][0]:
+                    stack.append(i)
+                    continue
+                else:
+                    while stack:
+                        postfix.append(stack.pop())
+                        if not stack or\
+                                self.__operators[i][0] <\
+                                self.__operators[stack[-1]][0] or\
+                                stack[-1] == '(':
+                            stack.append(i)
+                            break
+            elif i == '(':
+                stack.append(i)
+            elif i == ')':
+                while stack:
+                    if stack[-1] == '(':
+                        stack.pop()
+                        break
+                    postfix.append(stack.pop())
 
-            if i[0] == '-' and len(i) >= 2 and i[1] in string.digits:
-                negative = True
-                i = i[1:]
+        while stack:
+            postfix.append(stack.pop())
 
-            if len([_ for _ in i if _ in string.digits]) == len(i):
-                i = int(i)
-                if negative:
-                  #  print('Nega')
-                    i = -i
-                    negative = False
-                #print(i)
-                calc_stack.append(i)
-            else:
-                if determine_sign(i) == '-':
-                    negative = True
-        #print(calc_stack)
-        if calc_stack:
-            print(sum(calc_stack))
-        '''
+        return postfix
 
+    @staticmethod
+    def __is_valid_expression(expression):
+        if len(expression) > 0 and expression[1] != ')' and \
+                expression.count('(') == expression.count(')') and \
+                not re.search('[*/]{2,}', expression):
+            return True
+        return False
+
+
+def main():
+    calc = SmartCalculator()
+    while True:
+        ui = input()
+        calc.process_input(ui)
+
+
+if __name__ == '__main__':
+    main()
